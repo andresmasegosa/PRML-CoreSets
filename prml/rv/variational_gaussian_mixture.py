@@ -1,7 +1,8 @@
 import numpy as np
 from scipy.misc import logsumexp
-from scipy.special import digamma, gamma
+from scipy.special import digamma, gamma, gammaln
 from prml.rv.rv import RandomVariable
+import tensorflow as tf
 
 
 class VariationalGaussianMixture(RandomVariable):
@@ -175,3 +176,22 @@ class VariationalGaussianMixture(RandomVariable):
 
     def _pdf(self, X):
         return (self.alpha * self.student_t(X)).sum(axis=-1) / self.alpha.sum()
+
+    def logpdf(self, X):
+        log_probs = self.logstudent_t(X)
+        max_logs = np.max(log_probs, axis=1)
+        log_probs = log_probs - np.repeat(np.expand_dims(max_logs, axis=1), log_probs.shape[1], axis=1)
+        a = self.alpha * np.exp(log_probs) / self.alpha.sum()
+        return np.log(np.sum(a, axis=1)) + max_logs
+
+    def logstudent_t(self, X):
+        nu = self.dof + 1 - self.ndim
+        L = (nu * self.beta * self.W.T / (1 + self.beta)).T
+        d = X[:, None, :] - self.mu
+        maha_sq = np.sum(np.einsum('nki,kij->nkj', d, L) * d, axis=-1)
+        (sign, logdet) = np.linalg.slogdet(L)
+        return (
+            gammaln(0.5 * (nu + self.ndim))
+            +0.5*logdet
+            +(-0.5 * (nu + self.ndim))*np.log(1 + maha_sq / nu)
+            - (gammaln(0.5 * nu) + (0.5 * self.ndim)*np.log(nu * np.pi)))
